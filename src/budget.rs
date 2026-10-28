@@ -45,11 +45,20 @@ pub const DEFAULT_CAP_USD: f64 = 10.0;
 /// (GUTCHECK_BUDGET, default ~/.config/gutcheck/budget.toml), else DEFAULT_CAP_USD.
 pub fn cap() -> Result<f64, String> {
     if let Ok(v) = std::env::var("GUTCHECK_CAP_USD") {
-        return v.trim().parse().map_err(|_| format!("GUTCHECK_CAP_USD is not a number: {v}"));
+        return parse_dollars(&v).map_err(|_| format!("GUTCHECK_CAP_USD is not a number of dollars (0 or more): {v}"));
     }
     let p = budget_path();
     let Ok(text) = fs::read_to_string(&p) else { return Ok(DEFAULT_CAP_USD) };
     Ok(parse_cap(&text).map_err(|v| format!("per_month_usd in {} is not a number: {v}", p.display()))?.unwrap_or(DEFAULT_CAP_USD))
+}
+
+/// A dollar amount as written in a budget file or the environment: an optional trailing `# comment`
+/// and optional quotes are allowed. A cap must be finite and not negative, or the gate's comparison
+/// (spent + batch > cap) is false for NaN and the cap silently turns off.
+fn parse_dollars(raw: &str) -> Result<f64, ()> {
+    let v = raw.split('#').next().unwrap_or("").trim().trim_matches(|c| c == '"' || c == '\'').trim();
+    let n: f64 = v.parse().map_err(|_| ())?;
+    if n.is_finite() && n >= 0.0 { Ok(n) } else { Err(()) }
 }
 
 fn parse_cap(text: &str) -> Result<Option<f64>, String> {
@@ -60,7 +69,7 @@ fn parse_cap(text: &str) -> Result<Option<f64>, String> {
         } else if in_table {
             if let Some(v) = line.strip_prefix("per_month_usd") {
                 let v = v.trim_start().trim_start_matches('=').trim();
-                return v.parse().map(Some).map_err(|_| v.to_string());
+                return parse_dollars(v).map(Some).map_err(|_| v.to_string());
             }
         }
     }
@@ -99,6 +108,22 @@ mod tests {
         assert_eq!(parse_cap("[aion]\nper_month_usd = 3\n[gutcheck]\nper_month_usd = 7.5\n"), Ok(Some(7.5)));
         assert_eq!(parse_cap("[aion]\nper_month_usd = 3\n"), Ok(None));
         assert!(parse_cap("[gutcheck]\nper_month_usd = lots\n").is_err());
+    }
+
+    #[test]
+    fn cap_survives_a_comment_or_quotes_in_the_file() {
+        assert_eq!(parse_cap("[gutcheck]\nper_month_usd = 25  # my cap\n"), Ok(Some(25.0)));
+        assert_eq!(parse_cap("[gutcheck]\nper_month_usd = \"25\"\n"), Ok(Some(25.0)));
+        assert_eq!(parse_cap("[gutcheck]\nper_month_usd = '7.5' # note\n"), Ok(Some(7.5)));
+    }
+
+    #[test]
+    fn cap_rejects_values_that_would_turn_it_off() {
+        for bad in ["nan", "NaN", "inf", "infinity", "-1", "-inf"] {
+            assert!(parse_dollars(bad).is_err(), "{bad}");
+            assert!(parse_cap(&format!("[gutcheck]\nper_month_usd = {bad}\n")).is_err(), "{bad}");
+        }
+        assert_eq!(parse_dollars(" 0 "), Ok(0.0));
     }
 
     #[test]
