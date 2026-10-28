@@ -1,0 +1,12 @@
+[package]
+name = "gutcheck"
+version = "0.1.0"
+edition = "2021"
+description = "Cheap design gut-checks from Workers AI Clef-flash and Clairic: personas look at a screenshot, you read back probabilities."
+license = "MIT"
+
+[dependencies]
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+ureq = { version = "2", features = ["json"] }
